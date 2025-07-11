@@ -1,4 +1,3 @@
-import base64
 import os
 import json
 import logging
@@ -37,6 +36,9 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
+# Жестко заданный ID таблицы
+SPREADSHEET_ID = "12Mjnj2wwVDYZcNMzzZG6FC-qG29lFtdigDFOEHC6590"
+
 # Авторизация Google Sheets через переменные окружения
 def create_google_client():
     # Получаем значение переменной окружения
@@ -72,21 +74,32 @@ def create_google_client():
         logger.error(f"Ошибка при загрузке Google credentials: {e}")
         raise
 
-# Инициализация клиента
+# Инициализация клиента и таблицы
 try:
     CLIENT = create_google_client()
     logger.info("✅ Google Sheets authorization successful")
+    
+    # Открываем таблицу по жестко заданному ID
+    SPREADSHEET = CLIENT.open_by_key(SPREADSHEET_ID)
+    logger.info(f"✅ Spreadsheet loaded: {SPREADSHEET.title}")
+    
+    # Загрузка категорий
+    try:
+        cat_sheet = SPREADSHEET.worksheet('cat')
+        CATEGORIES = cat_sheet.col_values(1)
+        if CATEGORIES and CATEGORIES[0].lower() == "category":
+            CATEGORIES = CATEGORIES[1:]  # Пропуск заголовка
+        logger.info(f"Loaded {len(CATEGORIES)} categories")
+    except gspread.WorksheetNotFound:
+        CATEGORIES = []
+        logger.warning("Worksheet 'cat' not found")
+        
 except Exception as e:
-    logger.error(f"❌ Google Sheets authorization failed: {e}")
-    # Можно продолжить работу без Google Sheets?
-    # CLIENT = None
+    logger.error(f"❌ Initialization failed: {e}")
     raise
 
 # Глобальные переменные
-SPREADSHEET_URL = None
-SPREADSHEET = None
-CATEGORIES = []
-
+CATEGORIES = CATEGORIES if CATEGORIES else []
 
 async def start(update: Update, context: CallbackContext) -> None:
     """Обработчик команды /start"""
@@ -94,87 +107,12 @@ async def start(update: Update, context: CallbackContext) -> None:
         "💰 Бот для учета расходов\n\n"
         "Доступные команды:\n"
         "/add_expense - Добавить расход\n"
-        "/set_sheet - Установить Google таблицу\n"
-        "/help - Помощь"
+        "/help - Помощь\n\n"
+        f"Используется таблица: {SPREADSHEET.title}"
     )
-
-async def set_spreadsheet(update: Update, context: CallbackContext) -> None:
-    """Установка Google таблицы"""
-    global SPREADSHEET, SPREADSHEET_URL, CATEGORIES
-    
-    # Добавьте логирование для отладки
-    logger.info(f"Received command: {update.message.text}")
-    
-    try:
-        # Проверяем наличие аргумента
-        if not context.args:
-            raise IndexError("No URL provided")
-        
-        url = context.args[0]
-        logger.info(f"Processing URL: {url}")
-        
-        if 'docs.google.com' not in url:
-            raise ValueError("Invalid Google Sheets URL")
-        
-        # Извлечение ID таблицы
-        if '/d/' not in url:
-            raise ValueError("URL format error")
-        
-        # Универсальный способ извлечения ID
-        start_index = url.find('/d/') + 3
-        end_index = url.find('/', start_index)
-        if end_index == -1:
-            spreadsheet_id = url[start_index:]
-        else:
-            spreadsheet_id = url[start_index:end_index]
-        
-        logger.info(f"Extracted spreadsheet ID: {spreadsheet_id}")
-        
-        # Открываем таблицу
-        SPREADSHEET = CLIENT.open_by_key(spreadsheet_id)
-        SPREADSHEET_URL = url
-        
-        # Загрузка категорий
-        try:
-            cat_sheet = SPREADSHEET.worksheet('cat')
-            CATEGORIES = cat_sheet.col_values(1)
-            if CATEGORIES and CATEGORIES[0].lower() == "category":
-                CATEGORIES = CATEGORIES[1:]  # Пропуск заголовка
-        except gspread.WorksheetNotFound:
-            CATEGORIES = []
-            logger.warning("Worksheet 'cat' not found")
-        
-        # Логирование успеха
-        logger.info(f"Spreadsheet set successfully. Categories: {len(CATEGORIES)}")
-        
-        await update.message.reply_text(
-            f"✅ Таблица установлена!\n"
-            f"Ссылка: {url}\n"
-            f"Загружено категорий: {len(CATEGORIES)}"
-        )
-    except (IndexError, ValueError) as e:
-        error_msg = str(e) or "Invalid URL format"
-        logger.warning(f"Invalid URL: {error_msg}")
-        await update.message.reply_text(
-            "❌ Неверная ссылка. Пример правильной ссылки:\n"
-            "https://docs.google.com/spreadsheets/d/abc123xyz/edit\n\n"
-            "Повторите команду: /set_sheet <ссылка>"
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при установке таблицы: {e}", exc_info=True)
-        await update.message.reply_text(f"⚠️ Произошла ошибка: {str(e)}")
 
 async def start_add_expense(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления расхода"""
-    global SPREADSHEET
-    
-    if not SPREADSHEET:
-        await update.message.reply_text(
-            "❌ Google таблица не установлена!\n"
-            "Сначала выполните: /set_sheet <ссылка_на_таблицу>"
-        )
-        return ConversationHandler.END
-    
     # Создаем клавиатуру для выбора даты
     keyboard = [
         [InlineKeyboardButton("Сегодня", callback_data="today")],
@@ -309,7 +247,6 @@ def main() -> None:
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
-    application.add_handler(CommandHandler("set_sheet", set_spreadsheet))
     
     # Обработчик добавления расходов
     conv_handler = ConversationHandler(
