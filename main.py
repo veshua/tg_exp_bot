@@ -48,6 +48,20 @@ def create_google_client():
         # Прямая загрузка JSON из строки
         creds_info = json.loads(google_creds_json)
         
+        # Исправление формата приватного ключа
+        if 'private_key' in creds_info:
+            # Удаляем лишние экранирования
+            creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
+            
+            # Убедимся, что ключ начинается с корректного заголовка
+            if not creds_info['private_key'].startswith('-----BEGIN PRIVATE KEY-----'):
+                # Восстанавливаем формат PEM
+                creds_info['private_key'] = (
+                    "-----BEGIN PRIVATE KEY-----\n" +
+                    creds_info['private_key'] +
+                    "\n-----END PRIVATE KEY-----\n"
+                )
+        
         # Создаем Credentials объект напрямую
         creds = Credentials.from_service_account_info(creds_info)
         return gspread.authorize(creds)
