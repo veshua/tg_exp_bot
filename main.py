@@ -313,4 +313,20 @@ def main() -> None:
     application.run_polling()
 
 if __name__ == "__main__":
-    main()
+#    main()
+    print("Testing Google credentials...")
+    try:
+        creds_info = json.loads(os.getenv('GOOGLE_CREDENTIALS'))
+        private_key = creds_info.get('private_key', '')
+        
+        print("Private key starts with:", private_key[:50])
+        print("Private key ends with:", private_key[-50:])
+        
+        if "-----BEGIN PRIVATE KEY-----" not in private_key:
+            print("Warning: Missing PEM header")
+            
+        if "\\n" in private_key:
+            print("Warning: Found escaped newlines (\\n)")
+
+    except Exception as e:
+        print(f"Test failed: {e}")
