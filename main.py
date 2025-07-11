@@ -1,8 +1,8 @@
-import json
 import os
+import json
 import logging
-from datetime import datetime
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from datetime import datetime, timedelta
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -25,10 +25,16 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(name)
 
 # Константы для ConversationHandler
 DATE, CATEGORY, AMOUNT, COMMENT = range(4)
+
+# Константы для Google Sheets
+SCOPES = [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive'
+]
 
 # Авторизация Google Sheets через переменные окружения
 GOOGLE_CREDS_JSON = os.getenv('GOOGLE_CREDENTIALS')
@@ -39,8 +45,9 @@ try:
     creds_dict = json.loads(GOOGLE_CREDS_JSON)
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPES)
     CLIENT = gspread.authorize(creds)
+    logger.info("✅ Google Sheets authorization successful")
 except Exception as e:
-    logger.error(f"Ошибка при загрузке Google credentials: {e}")
+    logger.error(f"Google Sheets authorization failed: {e}")
     raise
 
 # Глобальные переменные
