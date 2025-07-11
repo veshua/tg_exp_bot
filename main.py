@@ -55,6 +55,7 @@ SPREADSHEET_URL = None
 SPREADSHEET = None
 CATEGORIES = []
 
+
 async def start(update: Update, context: CallbackContext) -> None:
     """Обработчик команды /start"""
     await update.message.reply_text(
