@@ -1,4 +1,4 @@
-import os
+import base64
 import json
 import logging
 from datetime import datetime, timedelta
@@ -13,7 +13,7 @@ from telegram.ext import (
     ConversationHandler
 )
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
 # Загрузка переменных окружения
@@ -37,17 +37,28 @@ SCOPES = [
 ]
 
 # Авторизация Google Sheets через переменные окружения
-GOOGLE_CREDS_JSON = os.getenv('GOOGLE_CREDENTIALS')
-if not GOOGLE_CREDS_JSON:
-    raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
+def create_google_client():
+    GOOGLE_CREDS_JSON = os.getenv('GOOGLE_CREDENTIALS')
+    if not GOOGLE_CREDS_JSON:
+        raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
+    
+    try:
+        # Прямая загрузка JSON из строки
+        creds_info = json.loads(GOOGLE_CREDENTIALS)
+        
+        # Создаем Credentials объект напрямую
+        creds = Credentials.from_service_account_info(creds_info)
+        return gspread.authorize(creds)
+    except Exception as e:
+        logger.error(f"Ошибка при загрузке Google credentials: {e}")
+        raise
 
+# Инициализация клиента
 try:
-    creds_dict = json.loads(GOOGLE_CREDS_JSON)
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPES)
-    CLIENT = gspread.authorize(creds)
+    CLIENT = create_google_client()
     logger.info("✅ Google Sheets authorization successful")
 except Exception as e:
-    logger.error(f"Google Sheets authorization failed: {e}")
+    logger.error(f"❌ Google Sheets authorization failed: {e}")
     raise
 
 # Глобальные переменные
