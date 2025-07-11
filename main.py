@@ -1,7 +1,7 @@
-import base64
 import os
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (
@@ -78,8 +78,6 @@ try:
     logger.info("✅ Google Sheets authorization successful")
 except Exception as e:
     logger.error(f"❌ Google Sheets authorization failed: {e}")
-    # Можно продолжить работу без Google Sheets?
-    # CLIENT = None
     raise
 
 # Глобальные переменные
@@ -101,44 +99,76 @@ async def start(update: Update, context: CallbackContext) -> None:
 async def set_spreadsheet(update: Update, context: CallbackContext) -> None:
     """Установка Google таблицы"""
     global SPREADSHEET, SPREADSHEET_URL, CATEGORIES
+    
+    logger.info(f"Command received: {update.message.text}")
+    
     try:
-        # Извлечение ID таблицы из URL
-        url = update.message.text.split(' ')[1]
-        if 'docs.google.com' not in url:
-            raise ValueError
+        # Используем контекст для получения аргументов
+        if not context.args:
+            await update.message.reply_text(
+                "❌ Не указана ссылка на таблицу.\n"
+                "Используйте: /set_sheet <ссылка_на_таблицу>"
+            )
+            return
+            
+        url = context.args[0]
+        logger.info(f"Processing URL: {url}")
         
-        # Форматы URL:
-        # https://docs.google.com/spreadsheets/d/ID/edit
-        # https://docs.google.com/spreadsheets/d/ID/
-        if '/edit' in url:
-            spreadsheet_id = url.split('/d/')[1].split('/edit')[0]
-        else:
-            spreadsheet_id = url.split('/d/')[1].split('/')[0]
+        # Извлечение ID таблицы с помощью регулярного выражения
+        match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', url)
+        if not match:
+            raise ValueError("Invalid Google Sheets URL format")
         
+        spreadsheet_id = match.group(1)
+        logger.info(f"Extracted spreadsheet ID: {spreadsheet_id}")
+        
+        # Открываем таблицу
         SPREADSHEET = CLIENT.open_by_key(spreadsheet_id)
         SPREADSHEET_URL = url
         
         # Загрузка категорий
         try:
             cat_sheet = SPREADSHEET.worksheet('cat')
-            CATEGORIES = cat_sheet.col_values(1)[1:]  # Пропуск заголовка
-        except gspread.WorksheetNotFound:
+            CATEGORIES = cat_sheet.col_values(1)
+            
+            # Автоматически определяем заголовок
+            if CATEGORIES and ("category" in CATEGORIES[0].lower() or "категория" in CATEGORIES[0].lower()):
+                CATEGORIES = CATEGORIES[1:]
+                
+            logger.info(f"Loaded {len(CATEGORIES)} categories")
+        except gspread.exceptions.WorksheetNotFound:
             CATEGORIES = []
+            logger.warning("Worksheet 'cat' not found")
+        except gspread.exceptions.APIError as api_err:
+            logger.error(f"Google Sheets API error: {api_err}")
+            raise
         
         await update.message.reply_text(
             f"✅ Таблица установлена!\n"
             f"Ссылка: {url}\n"
             f"Загружено категорий: {len(CATEGORIES)}"
         )
-    except (IndexError, ValueError):
+        
+    except ValueError as ve:
+        logger.warning(f"Invalid URL: {str(ve)}")
         await update.message.reply_text(
             "❌ Неверная ссылка. Пример правильной ссылки:\n"
             "https://docs.google.com/spreadsheets/d/abc123xyz/edit\n\n"
             "Повторите команду: /set_sheet <ссылка>"
         )
+    except gspread.exceptions.APIError as api_err:
+        logger.error(f"Google Sheets API error: {api_err}")
+        if api_err.response.status_code == 404:
+            error_msg = ("⚠️ Таблица не найдена. Проверьте:\n"
+                         "1. Правильность ссылки\n"
+                         "2. Доступ сервисного аккаунта к таблице\n"
+                         f"Ошибка: {str(api_err)}")
+        else:
+            error_msg = f"⚠️ Ошибка Google Sheets API: {str(api_err)}"
+        await update.message.reply_text(error_msg)
     except Exception as e:
-        logger.error(f"Ошибка при установке таблицы: {e}")
-        await update.message.reply_text("⚠️ Произошла ошибка. Проверьте доступ к таблице.")
+        logger.error(f"Ошибка при установке таблицы: {e}", exc_info=True)
+        await update.message.reply_text(f"⚠️ Произошла ошибка: {str(e)}")
 
 async def start_add_expense(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления расхода"""
@@ -247,8 +277,13 @@ async def save_expense(update: Update, context: CallbackContext) -> int:
     """Сохранение расхода в Google Sheets"""
     user_data = context.user_data
     try:
-        # Получаем лист для расходов
-        exp_sheet = SPREADSHEET.worksheet('exp')
+        # Проверяем наличие листа расходов
+        try:
+            exp_sheet = SPREADSHEET.worksheet('exp')
+        except gspread.exceptions.WorksheetNotFound:
+            # Создаем лист, если он не существует
+            exp_sheet = SPREADSHEET.add_worksheet(title='exp', rows=100, cols=4)
+            exp_sheet.append_row(['Date', 'Category', 'Sum', 'Comment'])
         
         # Подготавливаем данные
         row = [
@@ -262,9 +297,12 @@ async def save_expense(update: Update, context: CallbackContext) -> int:
         exp_sheet.append_row(row)
         
         await update.message.reply_text("✅ Расход успешно сохранен!")
+    except gspread.exceptions.APIError as api_err:
+        logger.error(f"Google Sheets API error: {api_err}")
+        await update.message.reply_text("⚠️ Ошибка при сохранении в таблицу. Попробуйте позже.")
     except Exception as e:
         logger.error(f"Ошибка при сохранении: {e}")
-        await update.message.reply_text("⚠️ Ошибка при сохранении в таблицу. Попробуйте позже.")
+        await update.message.reply_text("⚠️ Произошла ошибка при сохранении.")
     finally:
         context.user_data.clear()
     return ConversationHandler.END
