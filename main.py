@@ -31,47 +31,32 @@ logger = logging.getLogger(__name__)
 DATE, CATEGORY, AMOUNT, COMMENT = range(4)
 
 # Константы для Google Sheets
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
-]
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 
 # Жестко заданный ID таблицы
 SPREADSHEET_ID = "12Mjnj2wwVDYZcNMzzZG6FC-qG29lFtdigDFOEHC6590"
 
 # Авторизация Google Sheets через переменные окружения
 def create_google_client():
-    # Получаем значение переменной окружения
     google_creds_json = os.getenv('GOOGLE_CREDENTIALS')
     if not google_creds_json:
         raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
     
     try:
-        # Прямая загрузка JSON из строки
+        # Загружаем JSON без дополнительной обработки
         creds_info = json.loads(google_creds_json)
         
-        # Исправление формата приватного ключа
-        if 'private_key' in creds_info:
-            # Удаляем лишние экранирования
-            creds_info['private_key'] = creds_info['private_key'].replace('\\n', '\n')
-            
-            # Убедимся, что ключ начинается с корректного заголовка
-            if not creds_info['private_key'].startswith('-----BEGIN PRIVATE KEY-----'):
-                # Восстанавливаем формат PEM
-                creds_info['private_key'] = (
-                    "-----BEGIN PRIVATE KEY-----\n" +
-                    creds_info['private_key'] +
-                    "\n-----END PRIVATE KEY-----\n"
-                )
-        
-        # Создаем Credentials объект напрямую
-        creds = Credentials.from_service_account_info(creds_info)
+        # Создаем Credentials с явным указанием SCOPES
+        creds = Credentials.from_service_account_info(
+            creds_info, 
+            scopes=SCOPES
+        )
         return gspread.authorize(creds)
-    except json.JSONDecodeError:
-        logger.error("Неверный формат JSON в GOOGLE_CREDENTIALS")
-        raise
     except Exception as e:
-        logger.error(f"Ошибка при загрузке Google credentials: {e}")
+        logger.error(f"Google auth error: {e}")
+        # Для диагностики логируем часть ключа
+        if 'private_key' in creds_info:
+            logger.info(f"Private key start: {creds_info['private_key'][:50]}")
         raise
 
 # Инициализация клиента и таблицы
