@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 from datetime import datetime
@@ -29,15 +30,18 @@ logger = logging.getLogger(__name__)
 # Константы для ConversationHandler
 DATE, CATEGORY, AMOUNT, COMMENT = range(4)
 
-# Авторизация Google Sheets
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
-]
-CREDS = ServiceAccountCredentials.from_json_keyfile_name(
-    'credentials.json', SCOPES
-)
-CLIENT = gspread.authorize(CREDS)
+# Авторизация Google Sheets через переменные окружения
+GOOGLE_CREDS_JSON = os.getenv('GOOGLE_CREDENTIALS')
+if not GOOGLE_CREDS_JSON:
+    raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
+
+try:
+    creds_dict = json.loads(GOOGLE_CREDS_JSON)
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, SCOPES)
+    CLIENT = gspread.authorize(creds)
+except Exception as e:
+    logger.error(f"Ошибка при загрузке Google credentials: {e}")
+    raise
 
 # Глобальные переменные
 SPREADSHEET_URL = None
