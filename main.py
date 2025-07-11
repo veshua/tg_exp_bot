@@ -101,44 +101,68 @@ async def start(update: Update, context: CallbackContext) -> None:
 async def set_spreadsheet(update: Update, context: CallbackContext) -> None:
     """Установка Google таблицы"""
     global SPREADSHEET, SPREADSHEET_URL, CATEGORIES
+    
+    # Добавьте логирование для отладки
+    logger.info(f"Received command: {update.message.text}")
+    
     try:
-        # Извлечение ID таблицы из URL
-        url = update.message.text.split(' ')[1]
+        # Проверяем наличие аргумента
+        if not context.args:
+            raise IndexError("No URL provided")
+        
+        url = context.args[0]
+        logger.info(f"Processing URL: {url}")
+        
         if 'docs.google.com' not in url:
-            raise ValueError
+            raise ValueError("Invalid Google Sheets URL")
         
-        # Форматы URL:
-        # https://docs.google.com/spreadsheets/d/ID/edit
-        # https://docs.google.com/spreadsheets/d/ID/
-        if '/edit' in url:
-            spreadsheet_id = url.split('/d/')[1].split('/edit')[0]
+        # Извлечение ID таблицы
+        if '/d/' not in url:
+            raise ValueError("URL format error")
+        
+        # Универсальный способ извлечения ID
+        start_index = url.find('/d/') + 3
+        end_index = url.find('/', start_index)
+        if end_index == -1:
+            spreadsheet_id = url[start_index:]
         else:
-            spreadsheet_id = url.split('/d/')[1].split('/')[0]
+            spreadsheet_id = url[start_index:end_index]
         
+        logger.info(f"Extracted spreadsheet ID: {spreadsheet_id}")
+        
+        # Открываем таблицу
         SPREADSHEET = CLIENT.open_by_key(spreadsheet_id)
         SPREADSHEET_URL = url
         
         # Загрузка категорий
         try:
             cat_sheet = SPREADSHEET.worksheet('cat')
-            CATEGORIES = cat_sheet.col_values(1)[1:]  # Пропуск заголовка
+            CATEGORIES = cat_sheet.col_values(1)
+            if CATEGORIES and CATEGORIES[0].lower() == "category":
+                CATEGORIES = CATEGORIES[1:]  # Пропуск заголовка
         except gspread.WorksheetNotFound:
             CATEGORIES = []
+            logger.warning("Worksheet 'cat' not found")
+        
+        # Логирование успеха
+        logger.info(f"Spreadsheet set successfully. Categories: {len(CATEGORIES)}")
         
         await update.message.reply_text(
             f"✅ Таблица установлена!\n"
             f"Ссылка: {url}\n"
             f"Загружено категорий: {len(CATEGORIES)}"
         )
-    except (IndexError, ValueError):
+    except (IndexError, ValueError) as e:
+        error_msg = str(e) or "Invalid URL format"
+        logger.warning(f"Invalid URL: {error_msg}")
         await update.message.reply_text(
             "❌ Неверная ссылка. Пример правильной ссылки:\n"
             "https://docs.google.com/spreadsheets/d/abc123xyz/edit\n\n"
             "Повторите команду: /set_sheet <ссылка>"
         )
     except Exception as e:
-        logger.error(f"Ошибка при установке таблицы: {e}")
-        await update.message.reply_text("⚠️ Произошла ошибка. Проверьте доступ к таблице.")
+        logger.error(f"Ошибка при установке таблицы: {e}", exc_info=True)
+        await update.message.reply_text(f"⚠️ Произошла ошибка: {str(e)}")
 
 async def start_add_expense(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления расхода"""
