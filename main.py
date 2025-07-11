@@ -39,17 +39,21 @@ SCOPES = [
 
 # Авторизация Google Sheets через переменные окружения
 def create_google_client():
-    GOOGLE_CREDS_JSON = os.getenv('GOOGLE_CREDENTIALS')
-    if not GOOGLE_CREDS_JSON:
+    # Получаем значение переменной окружения
+    google_creds_json = os.getenv('GOOGLE_CREDENTIALS')
+    if not google_creds_json:
         raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
     
     try:
         # Прямая загрузка JSON из строки
-        creds_info = json.loads(GOOGLE_CREDENTIALS)
+        creds_info = json.loads(google_creds_json)
         
         # Создаем Credentials объект напрямую
         creds = Credentials.from_service_account_info(creds_info)
         return gspread.authorize(creds)
+    except json.JSONDecodeError:
+        logger.error("Неверный формат JSON в GOOGLE_CREDENTIALS")
+        raise
     except Exception as e:
         logger.error(f"Ошибка при загрузке Google credentials: {e}")
         raise
@@ -60,6 +64,8 @@ try:
     logger.info("✅ Google Sheets authorization successful")
 except Exception as e:
     logger.error(f"❌ Google Sheets authorization failed: {e}")
+    # Можно продолжить работу без Google Sheets?
+    # CLIENT = None
     raise
 
 # Глобальные переменные
