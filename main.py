@@ -71,12 +71,6 @@ SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 SPREADSHEET = None
 CATEGORIES = []
 
-# Основная клавиатура с кнопкой "Добавить расход"
-MAIN_KEYBOARD = ReplyKeyboardMarkup(
-    [["Добавить расход"]],
-    resize_keyboard=True
-)
-
 def initialize_spreadsheet():
     """Инициализация Google таблицы при запуске бота"""
     global SPREADSHEET, CATEGORIES
@@ -125,22 +119,11 @@ async def start(update: Update, context: CallbackContext) -> None:
         "Доступные команды:\n"
         "/add_expense - Добавить расход\n"
         "/help - Помощь\n\n"
-        f"Используется таблица:\n{SPREADSHEET_URL}",
-        reply_markup=MAIN_KEYBOARD
+        f"Используется таблица:\n{SPREADSHEET_URL}"
     )
-
-async def handle_add_expense_button(update: Update, context: CallbackContext) -> None:
-    """Обработка кнопки 'Добавить расход'"""
-    await start_add_expense(update, context)
 
 async def start_add_expense(update: Update, context: CallbackContext) -> int:
     """Начало процесса добавления расхода"""
-    # Убираем основную клавиатуру перед началом диалога
-    await update.message.reply_text(
-        "Начинаем добавление расхода...",
-        reply_markup=ReplyKeyboardRemove()
-    )
-    
     # Создаем клавиатуру для выбора даты
     keyboard = [
         [InlineKeyboardButton("Сегодня", callback_data="today")],
@@ -256,22 +239,13 @@ async def save_expense(update: Update, context: CallbackContext) -> int:
         # Добавляем новую строку
         exp_sheet.append_row(row)
         
-        await update.message.reply_text(
-            "✅ Расход успешно сохранен!",
-            reply_markup=MAIN_KEYBOARD  # Возвращаем основную клавиатуру
-        )
+        await update.message.reply_text("✅ Расход успешно сохранен!")
     except gspread.exceptions.APIError as api_err:
         logger.error(f"Google Sheets API error: {api_err}")
-        await update.message.reply_text(
-            "⚠️ Ошибка при сохранении в таблицу. Попробуйте позже.",
-            reply_markup=MAIN_KEYBOARD
-        )
+        await update.message.reply_text("⚠️ Ошибка при сохранении в таблицу. Попробуйте позже.")
     except Exception as e:
         logger.error(f"Ошибка при сохранении: {e}")
-        await update.message.reply_text(
-            "⚠️ Произошла ошибка при сохранении.",
-            reply_markup=MAIN_KEYBOARD
-        )
+        await update.message.reply_text("⚠️ Произошла ошибка при сохранении.")
     finally:
         context.user_data.clear()
     return ConversationHandler.END
@@ -280,7 +254,7 @@ async def cancel(update: Update, context: CallbackContext) -> int:
     """Отмена операции"""
     await update.message.reply_text(
         "❌ Операция отменена",
-        reply_markup=MAIN_KEYBOARD  # Возвращаем основную клавиатуру
+        reply_markup=ReplyKeyboardRemove()
     )
     context.user_data.clear()
     return ConversationHandler.END
@@ -299,13 +273,6 @@ def main() -> None:
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
-    application.add_handler(CommandHandler("add_expense", start_add_expense))
-    
-    # Обработчик текстовых сообщений для кнопки "Добавить расход"
-    application.add_handler(MessageHandler(
-        filters.Regex(r'^Добавить расход$') & ~filters.COMMAND,
-        handle_add_expense_button
-    ))
     
     # Обработчик добавления расходов
     conv_handler = ConversationHandler(
