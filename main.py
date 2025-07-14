@@ -74,8 +74,7 @@ CATEGORIES = []
 # Основная клавиатура с кнопкой "Добавить расход"
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [["Добавить расход"]],
-    resize_keyboard=True,
-    persistent=True
+    resize_keyboard=True
 )
 
 def initialize_spreadsheet():
