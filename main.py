@@ -157,24 +157,23 @@ async def save_expense(update: Update, context: CallbackContext) -> int:
     try:
         sheet = SPREADSHEET.worksheet('exp')
     except gspread.exceptions.WorksheetNotFound:
-        sheet = SPREADSHEET.add_worksheet(title="exp", rows="100", cols="4")
-        sheet.append_row(["Date", "Category", "Sum", "Comment"])
+        sheet = SPREADSHEET.add_worksheet(title="exp", rows="100", cols="5")
+        sheet.append_row(["Date", "Category", "Sum", "Comment", "User"])
+
+    # Получение username
+    user = update.effective_user
+    username = user.username or f"{user.first_name} {user.last_name or ''}".strip()
 
     row = [
         context.user_data['date'],
         context.user_data['category'],
         context.user_data['amount'],
-        context.user_data['comment']
+        context.user_data['comment'],
+        username
     ]
 
     sheet.append_row(row)
     await update.message.reply_text("✅ Расход добавлен!")
-    context.user_data.clear()
-    await send_main_menu(update, context)
-    return ConversationHandler.END
-
-async def cancel(update: Update, context: CallbackContext) -> int:
-    await update.message.reply_text("❌ Операция отменена.", reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
     await send_main_menu(update, context)
     return ConversationHandler.END
