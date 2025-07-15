@@ -3,121 +3,112 @@ import json
 import logging
 from datetime import datetime, timedelta
 from telegram import (
-    Update,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove
+    Update, InlineKeyboardMarkup, InlineKeyboardButton,
+    ReplyKeyboardMarkup, ReplyKeyboardRemove, KeyboardButton
 )
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackContext,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
+    Application, CommandHandler, CallbackContext,
+    CallbackQueryHandler, MessageHandler, filters,
     ConversationHandler
 )
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
-# === Константы ===
-DATE, CATEGORY, AMOUNT, COMMENT = range(4)
-SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+# Загрузка переменных окружения
+load_dotenv()
+TOKEN = os.getenv('TELEGRAM_TOKEN')
 SPREADSHEET_ID = "12Mjnj2wwVDYZcNMzzZG6FC-qG29IFtdigDFOEHC6590"
 
-# === Загрузка переменных окружения ===
-load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-# === Логирование ===
+# Настройка логирования
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# === Глобальные переменные ===
-SPREADSHEET = None
+# Состояния
+DATE, CATEGORY, AMOUNT, COMMENT = range(4)
+
+SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
+
+# Авторизация Google Sheets
+def create_google_client():
+    creds_info = json.loads(os.getenv("GOOGLE_CREDENTIALS"))
+    creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
+    return gspread.authorize(creds)
+
+try:
+    CLIENT = create_google_client()
+    logger.info("✅ Авторизация Google Sheets прошла успешно.")
+except Exception as e:
+    logger.error(f"❌ Ошибка авторизации: {e}")
+    raise
+
+SPREADSHEET = CLIENT.open_by_key(SPREADSHEET_ID)
 SPREADSHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}"
 CATEGORIES = []
 
-# === Авторизация Google Sheets ===
-def create_google_client():
-    creds_json = os.getenv("GOOGLE_CREDENTIALS")
-    if not creds_json:
-        raise ValueError("GOOGLE_CREDENTIALS not set")
-    creds = Credentials.from_service_account_info(json.loads(creds_json), scopes=SCOPES)
-    return gspread.authorize(creds)
-
-# === Инициализация таблицы ===
 def initialize_spreadsheet():
-    global SPREADSHEET, CATEGORIES
-    CLIENT = create_google_client()
-    SPREADSHEET = CLIENT.open_by_key(SPREADSHEET_ID)
+    global CATEGORIES
     try:
-        cat_sheet = SPREADSHEET.worksheet('cat')
+        cat_sheet = SPREADSHEET.worksheet("cat")
         CATEGORIES = cat_sheet.col_values(1)
         if CATEGORIES and ("category" in CATEGORIES[0].lower() or "категория" in CATEGORIES[0].lower()):
             CATEGORIES = CATEGORIES[1:]
+        logger.info(f"Категории загружены: {len(CATEGORIES)}")
     except Exception as e:
-        logger.warning(f"Не удалось загрузить категории: {e}")
+        logger.warning("Не удалось загрузить категории: %s", e)
         CATEGORIES = []
 
-# === Обработчики ===
-
 async def send_main_menu(update: Update, context: CallbackContext):
-    keyboard = [["➕ Добавить расход"]]
+    keyboard = [[KeyboardButton("➕ Добавить расход")]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    await update.message.reply_text(
-        "Выберите действие:", reply_markup=reply_markup
-    )
+    if update.message:
+        await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
 async def start(update: Update, context: CallbackContext):
     await update.message.reply_text(
-        "💰 Бот для учета расходов\n"
-        "Команды:\n"
-        "/add_expense — добавить расход\n"
-        "/help — помощь\n"
-        f"Используется таблица:\n{SPREADSHEET_URL}"
+        "💰 Бот для учета расходов.\n"
+        f"📊 Таблица: {SPREADSHEET_URL}"
     )
     await send_main_menu(update, context)
+
+async def handle_text_menu(update: Update, context: CallbackContext):
+    if update.message.text == "➕ Добавить расход":
+        return await start_add_expense(update, context)
 
 async def start_add_expense(update: Update, context: CallbackContext) -> int:
     keyboard = [
         [InlineKeyboardButton("Сегодня", callback_data="today")],
         [InlineKeyboardButton("Вчера", callback_data="yesterday")],
-        [InlineKeyboardButton("Другая дата", callback_data="other")]
+        [InlineKeyboardButton("Другая дата", callback_data="other")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    if update.message:
-        await update.message.reply_text("📅 Выберите дату расхода:", reply_markup=reply_markup)
-    elif update.callback_query:
-        await update.callback_query.message.reply_text("📅 Выберите дату расхода:", reply_markup=reply_markup)
-
+    await update.message.reply_text("📅 Выберите дату расхода:", reply_markup=reply_markup)
     return DATE
 
 async def handle_date(update: Update, context: CallbackContext) -> int:
     query = update.callback_query
     await query.answer()
-    choice = query.data
 
+    choice = query.data
     if choice == "today":
         selected_date = datetime.now().date()
     elif choice == "yesterday":
         selected_date = datetime.now().date() - timedelta(days=1)
     else:
-        await query.edit_message_text("✏️ Введите дату в формате ДД.ММ.ГГГГ (например, 25.12.2023)")
+        await query.edit_message_text("✏️ Введите дату в формате ДД.ММ.ГГГГ:")
         return DATE
 
     context.user_data['date'] = selected_date.strftime("%d.%m.%Y")
+    await query.edit_message_text(f"📅 Дата: {context.user_data['date']}")
     await show_categories(query.message)
     return CATEGORY
 
 async def show_categories(message):
     if not CATEGORIES:
-        await message.reply_text("Список категорий пуст. Добавьте их в лист 'cat'.")
+        await message.reply_text("❗ Категории не найдены. Добавьте их в лист 'cat'.")
         return
-
     keyboard = [[cat] for cat in CATEGORIES]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     await message.reply_text("📁 Выберите категорию:", reply_markup=reply_markup)
@@ -125,12 +116,12 @@ async def show_categories(message):
 async def handle_category(update: Update, context: CallbackContext) -> int:
     category = update.message.text
     if category not in CATEGORIES:
-        await update.message.reply_text("❌ Категория не найдена. Попробуйте ещё раз.")
+        await update.message.reply_text("❗ Категория не найдена. Выберите из списка:")
         await show_categories(update.message)
         return CATEGORY
 
     context.user_data['category'] = category
-    await update.message.reply_text("💵 Введите сумму расхода (только цифры):", reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text("💵 Введите сумму расхода (например 1250.50):", reply_markup=ReplyKeyboardRemove())
     return AMOUNT
 
 async def handle_amount(update: Update, context: CallbackContext) -> int:
@@ -139,10 +130,10 @@ async def handle_amount(update: Update, context: CallbackContext) -> int:
         if amount <= 0:
             raise ValueError
         context.user_data['amount'] = amount
-        await update.message.reply_text("📝 Введите комментарий (или /skip):")
+        await update.message.reply_text("📝 Введите комментарий (или /skip для пропуска):")
         return COMMENT
     except ValueError:
-        await update.message.reply_text("❌ Введите корректную сумму.")
+        await update.message.reply_text("❌ Введите корректную сумму (только цифры):")
         return AMOUNT
 
 async def handle_comment(update: Update, context: CallbackContext) -> int:
@@ -155,53 +146,59 @@ async def skip_comment(update: Update, context: CallbackContext) -> int:
 
 async def save_expense(update: Update, context: CallbackContext) -> int:
     try:
-        sheet = SPREADSHEET.worksheet('exp')
-    except gspread.exceptions.WorksheetNotFound:
-        sheet = SPREADSHEET.add_worksheet(title="exp", rows="100", cols="5")
-        sheet.append_row(["Date", "Category", "Sum", "Comment", "User"])
+        try:
+            sheet = SPREADSHEET.worksheet('exp')
+        except gspread.exceptions.WorksheetNotFound:
+            sheet = SPREADSHEET.add_worksheet(title="exp", rows="100", cols="5")
+            sheet.append_row(["Date", "Category", "Sum", "Comment", "User"])
 
-    # Получение username
-    user = update.effective_user
-    username = user.username or f"{user.first_name} {user.last_name or ''}".strip()
+        user = update.effective_user
+        username = user.username or f"{user.first_name} {user.last_name or ''}".strip()
 
-    row = [
-        context.user_data['date'],
-        context.user_data['category'],
-        context.user_data['amount'],
-        context.user_data['comment'],
-        username
-    ]
+        row = [
+            context.user_data['date'],
+            context.user_data['category'],
+            context.user_data['amount'],
+            context.user_data['comment'],
+            username
+        ]
+        sheet.append_row(row)
 
-    sheet.append_row(row)
-    await update.message.reply_text("✅ Расход добавлен!")
+        await update.message.reply_text("✅ Расход успешно добавлен!")
+    except Exception as e:
+        logger.error(f"Ошибка сохранения расхода: {e}")
+        await update.message.reply_text("⚠️ Не удалось сохранить расход.")
+    finally:
+        context.user_data.clear()
+        await send_main_menu(update, context)
+        return ConversationHandler.END
+
+async def cancel(update: Update, context: CallbackContext) -> int:
+    await update.message.reply_text("❌ Операция отменена.", reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
     await send_main_menu(update, context)
     return ConversationHandler.END
-
-# === Main ===
 
 def main():
     initialize_spreadsheet()
     application = Application.builder().token(TOKEN).build()
 
-    # Команды
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", start))
 
-    # Диалог добавления расхода
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_menu))
+
     conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("add_expense", start_add_expense),
-            MessageHandler(filters.TEXT & filters.Regex(r'^➕ Добавить расход$'), start_add_expense)
-        ],
+        entry_points=[CommandHandler("add_expense", start_add_expense)],
         states={
-            DATE: [CallbackQueryHandler(handle_date, pattern="^(today|yesterday|other)$")],
+            DATE: [CallbackQueryHandler(handle_date, pattern="^(today|yesterday|other)$"),
+                   MessageHandler(filters.TEXT & ~filters.COMMAND, handle_date)],
             CATEGORY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_category)],
             AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_amount)],
             COMMENT: [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_comment),
                 CommandHandler("skip", skip_comment)
-            ]
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -211,4 +208,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
